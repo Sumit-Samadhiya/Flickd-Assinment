@@ -1,0 +1,9 @@
+{
+  "expo": {
+    "name": "ClipArt AI",
+    "slug": "clipart-ai",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "platforms": ["android"]
+  }
+}
