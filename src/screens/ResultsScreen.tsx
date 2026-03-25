@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Toast from 'react-native-toast-message';
-import { useAppStore } from '@context/AppContext';
+import { useAppState } from '@hooks/useAppState';
 import { shareService } from '@services/shareService';
 import { STYLE_LABELS, STYLE_EMOJIS, STYLES } from '@utils/prompts';
 import { colors, spacing, radius, typography, shadows } from '@styles/tokens';
@@ -20,11 +20,12 @@ import type { ResultsScreenProps } from '@navigation/types';
 import type { ClipArtStyle } from '@appTypes/index';
 
 export function ResultsScreen({ navigation }: ResultsScreenProps) {
-  const generatedImages = useAppStore(s => s.generatedImages);
+  const { state } = useAppState();
+  const { generatedImages } = state;
   const [selectedStyle, setSelectedStyle] = useState<ClipArtStyle>('cartoon');
   const [downloadingStyle, setDownloadingStyle] = useState<ClipArtStyle | null>(null);
 
-  const availableStyles = STYLES.filter(s => !!generatedImages[s]);
+  const availableStyles = STYLES.filter(s => generatedImages[s] !== null);
   const currentResult = generatedImages[selectedStyle];
 
   const handleSave = async (style: ClipArtStyle) => {

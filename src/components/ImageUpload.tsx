@@ -9,7 +9,7 @@ import React from 'react';
 import { View, Text, Image, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import { colors, spacing, radius, typography } from '@styles/tokens';
 import { useImageUpload } from '@hooks/useImageUpload';
-import { useAppStore } from '@context/AppContext';
+import { useAppState } from '@hooks/useAppState';
 
 interface ImageUploadProps {
   onImageReady?: () => void;
@@ -17,8 +17,8 @@ interface ImageUploadProps {
 
 export function ImageUpload({ onImageReady: _onImageReady }: ImageUploadProps) {
   const { pickFromGallery, pickFromCamera, isLoading } = useImageUpload();
-  const originalImage = useAppStore(s => s.originalImage);
-  const error = useAppStore(s => s.error);
+  const { state } = useAppState();
+  const { originalImage, uploadError } = state;
 
   return (
     <View style={styles.container}>
@@ -47,9 +47,9 @@ export function ImageUpload({ onImageReady: _onImageReady }: ImageUploadProps) {
       </TouchableOpacity>
 
       {/* Error */}
-      {error && (
+      {uploadError && (
         <View style={styles.errorBox}>
-          <Text style={styles.errorText}>{error}</Text>
+          <Text style={styles.errorText}>{uploadError}</Text>
         </View>
       )}
 

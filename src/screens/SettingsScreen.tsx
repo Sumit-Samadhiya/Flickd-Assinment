@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useAppStore } from '@context/AppContext';
+import { useAppState } from '@hooks/useAppState';
 import { storageService } from '@services/storageService';
 import Toast from 'react-native-toast-message';
 import { colors, spacing, radius, typography } from '@styles/tokens';
@@ -9,15 +9,16 @@ import { globalStyles } from '@styles/globalStyles';
 import type { SettingsScreenProps } from '@navigation/types';
 
 export function SettingsScreen(_props: SettingsScreenProps) {
-  const resetAll = useAppStore(s => s.resetAll);
+  const { resetState } = useAppState();
 
   const handleClearCache = async () => {
-    await storageService.clearResultsCache();
+    await storageService.clearAllCache();
     Toast.show({ type: 'success', text1: 'Cache cleared', text2: 'All cached results removed.' });
   };
 
-  const handleResetApp = () => {
-    resetAll();
+  const handleResetApp = async () => {
+    await storageService.clearAllCache();
+    resetState();
     Toast.show({ type: 'success', text1: 'State reset', text2: 'App state has been reset.' });
   };
 

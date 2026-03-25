@@ -202,6 +202,7 @@ export async function compressImage(
     return await withTempImageFromBase64(base64String, mimeType, async tempUri => {
       let currentQuality = Math.min(100, Math.max(30, Math.round(quality)));
 
+      // eslint-disable-next-line no-constant-condition
       while (true) {
         const result = await ImageManipulator.manipulateAsync(
           tempUri,

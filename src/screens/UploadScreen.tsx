@@ -11,18 +11,17 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useImageUpload } from '@hooks/useImageUpload';
-import { useAppStore } from '@context/AppContext';
+import { useAppState } from '@hooks/useAppState';
 import { colors, spacing, radius, typography, shadows } from '@styles/tokens';
 import { globalStyles } from '@styles/globalStyles';
 import type { UploadScreenProps } from '@navigation/types';
 
 export function UploadScreen({ navigation }: UploadScreenProps) {
   const { pickFromGallery, pickFromCamera, isLoading } = useImageUpload();
-  const originalImage = useAppStore(s => s.originalImage);
-  const processedImage = useAppStore(s => s.processedImage);
-  const error = useAppStore(s => s.error);
+  const { state } = useAppState();
+  const { originalImage, uploadError } = state;
 
-  const canProceed = !!processedImage && !isLoading;
+  const canProceed = !!originalImage && !isLoading;
 
   const handleContinue = () => {
     if (!originalImage) return;
@@ -60,9 +59,9 @@ export function UploadScreen({ navigation }: UploadScreenProps) {
         </View>
 
         {/* Error message */}
-        {error && (
+        {uploadError && (
           <View style={styles.errorBox}>
-            <Text style={styles.errorText}>{error}</Text>
+            <Text style={styles.errorText}>{uploadError}</Text>
           </View>
         )}
 

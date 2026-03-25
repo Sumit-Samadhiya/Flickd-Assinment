@@ -103,7 +103,20 @@ export interface ProcessedImage {
   fileSizeBytes: number;
 }
 
-// ─── App State ────────────────────────────────────────────────────────────────
+// ─── Image Metadata (Step 3) ──────────────────────────────────────────────────
+
+export type {
+  ImageDimensions,
+  ImageValidationResult,
+  ImageData,
+  CompressionOptions,
+} from '@services/imageService';
+
+// ─── App State (Step 4) ───────────────────────────────────────────────────────
+
+export type { AppContextState } from '@context/AppContext';
+
+// ─── App State (Legacy - may be deprecated) ──────────────────────────────────
 
 export interface AppState {
   originalImage: UploadedImage | null;
@@ -126,10 +139,3 @@ export interface AppError {
   message: string;
   retryable?: boolean;
 }
-
-export type {
-  ImageDimensions,
-  ImageValidationResult,
-  ImageData,
-  CompressionOptions,
-} from '@services/imageService';

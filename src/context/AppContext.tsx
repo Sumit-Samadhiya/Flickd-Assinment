@@ -1,112 +1,172 @@
 /**
  * AppContext.tsx
  *
- * Global state management using Zustand.
- * The AppProvider is a thin wrapper for future cross-cutting concerns
- * (theme, analytics, etc.). For state, use useAppStore() directly.
+ * Global state management using Context API + useReducer.
  */
 
-import React, { type ReactNode } from 'react';
-import { create } from 'zustand';
+import React, { createContext, useContext, useReducer, type ReactNode } from 'react';
 import { STYLE_CONFIG } from '@utils/constants';
-import type {
-  AppState,
-  UploadedImage,
-  ProcessedImage,
-  ClipArtStyle,
-  GenerationResponse,
-  GenerationStatus,
-} from '@appTypes/index';
+import type { ClipArtStyle, UploadedImage, GenerationResponse } from '@appTypes/index';
 
-// ─── Store Interface ──────────────────────────────────────────────────────────
+// ─── App Context State ────────────────────────────────────────────────────────
 
-interface AppStore extends AppState {
-  // Image actions
-  setOriginalImage: (image: UploadedImage | null) => void;
-  setProcessedImage: (image: ProcessedImage | null) => void;
+export interface AppContextState {
+  originalImage: UploadedImage | null;
+  isUploadingImage: boolean;
+  uploadError: string | null;
 
-  // Generation actions
-  setGeneratedImage: (style: ClipArtStyle, response: GenerationResponse) => void;
-  setSelectedStyles: (styles: ClipArtStyle[]) => void;
-  setGenerationStatus: (status: GenerationStatus, progress?: number) => void;
-  setCurrentJobId: (jobId: string | null) => void;
-  setGenerationProgress: (progress: number) => void;
+  generatedImages: Record<ClipArtStyle, GenerationResponse | null>;
+  isGenerating: boolean;
+  generationProgress: number;
+  selectedStyles: ClipArtStyle[];
+  generationError: string | null;
 
-  // Error
-  setError: (error: string | null) => void;
+  currentStep: 'upload' | 'select-styles' | 'generating' | 'results';
+  styleIntensity: number;
 
-  // Resets
-  resetGeneration: () => void;
-  resetAll: () => void;
+  cachedImageHash: string | null;
 }
+
+// ─── Action Types ─────────────────────────────────────────────────────────────
+
+export type AppAction =
+  | { type: 'SET_ORIGINAL_IMAGE'; payload: UploadedImage }
+  | { type: 'CLEAR_ORIGINAL_IMAGE' }
+  | { type: 'SET_UPLOAD_LOADING'; payload: boolean }
+  | { type: 'SET_UPLOAD_ERROR'; payload: string | null }
+  | { type: 'SET_SELECTED_STYLES'; payload: ClipArtStyle[] }
+  | { type: 'SET_GENERATION_LOADING'; payload: boolean }
+  | { type: 'SET_GENERATION_PROGRESS'; payload: number }
+  | { type: 'SET_GENERATED_IMAGE'; payload: { style: ClipArtStyle; image: GenerationResponse } }
+  | { type: 'SET_ALL_GENERATED_IMAGES'; payload: GenerationResponse[] }
+  | { type: 'SET_GENERATION_ERROR'; payload: string | null }
+  | { type: 'SET_CURRENT_STEP'; payload: AppContextState['currentStep'] }
+  | { type: 'SET_STYLE_INTENSITY'; payload: number }
+  | { type: 'SET_CACHED_IMAGE_HASH'; payload: string | null }
+  | { type: 'RESET_STATE' };
 
 // ─── Initial State ────────────────────────────────────────────────────────────
 
-const initialState: AppState = {
+const initialState: AppContextState = {
   originalImage: null,
-  processedImage: null,
-  generatedImages: {},
+  isUploadingImage: false,
+  uploadError: null,
+  generatedImages: {
+    cartoon: null,
+    flat: null,
+    anime: null,
+    pixel: null,
+    sketch: null,
+  },
   isGenerating: false,
-  selectedStyles: [...STYLE_CONFIG.ALL_STYLES] as ClipArtStyle[],
   generationProgress: 0,
-  generationStatus: 'idle',
-  currentJobId: null,
-  error: null,
+  selectedStyles: [...STYLE_CONFIG.ALL_STYLES] as ClipArtStyle[],
+  generationError: null,
+  currentStep: 'upload',
+  styleIntensity: 5,
+  cachedImageHash: null,
 };
 
-// ─── Zustand Store ────────────────────────────────────────────────────────────
+// ─── Reducer ───────────────────────────────────────────────────────────────────
 
-export const useAppStore = create<AppStore>(set => ({
-  ...initialState,
+function appReducer(state: AppContextState, action: AppAction): AppContextState {
+  switch (action.type) {
+    case 'SET_ORIGINAL_IMAGE':
+      return { ...state, originalImage: action.payload };
 
-  setOriginalImage: image =>
-    set({ originalImage: image }),
+    case 'CLEAR_ORIGINAL_IMAGE':
+      return {
+        ...state,
+        originalImage: null,
+        generatedImages: initialState.generatedImages,
+        generationProgress: 0,
+        generationError: null,
+      };
 
-  setProcessedImage: image =>
-    set({ processedImage: image }),
+    case 'SET_UPLOAD_LOADING':
+      return { ...state, isUploadingImage: action.payload };
 
-  setGeneratedImage: (style, response) =>
-    set(state => ({
-      generatedImages: { ...state.generatedImages, [style]: response },
-    })),
+    case 'SET_UPLOAD_ERROR':
+      return { ...state, uploadError: action.payload };
 
-  setSelectedStyles: styles =>
-    set({ selectedStyles: styles }),
+    case 'SET_SELECTED_STYLES':
+      return { ...state, selectedStyles: action.payload };
 
-  setGenerationStatus: (status, progress) =>
-    set({
-      generationStatus: status,
-      isGenerating: status === 'queued' || status === 'processing',
-      ...(progress !== undefined ? { generationProgress: progress } : {}),
-    }),
+    case 'SET_GENERATION_LOADING':
+      return { ...state, isGenerating: action.payload };
 
-  setCurrentJobId: jobId =>
-    set({ currentJobId: jobId }),
+    case 'SET_GENERATION_PROGRESS':
+      return { ...state, generationProgress: action.payload };
 
-  setGenerationProgress: progress =>
-    set({ generationProgress: progress }),
+    case 'SET_GENERATED_IMAGE':
+      return {
+        ...state,
+        generatedImages: {
+          ...state.generatedImages,
+          [action.payload.style]: action.payload.image,
+        },
+      };
 
-  setError: error =>
-    set({ error }),
+    case 'SET_ALL_GENERATED_IMAGES': {
+      // Convert array of GenerationResponse to Record<ClipArtStyle, GenerationResponse>
+      const imageRecord = action.payload.reduce(
+        (acc, response) => {
+          acc[response.styleType] = response;
+          return acc;
+        },
+        { ...initialState.generatedImages }
+      );
+      return {
+        ...state,
+        generatedImages: imageRecord,
+      };
+    }
 
-  resetGeneration: () =>
-    set({
-      generatedImages: {},
-      isGenerating: false,
-      generationProgress: 0,
-      generationStatus: 'idle',
-      currentJobId: null,
-      error: null,
-    }),
+    case 'SET_GENERATION_ERROR':
+      return { ...state, generationError: action.payload };
 
-  resetAll: () =>
-    set(initialState),
-}));
+    case 'SET_CURRENT_STEP':
+      return { ...state, currentStep: action.payload };
 
-// ─── App Provider ─────────────────────────────────────────────────────────────
-// Currently a passthrough. Wrap here if you need React context providers
-// (e.g., ThemeContext, AnalyticsContext) without a full navigation solution.
+    case 'SET_STYLE_INTENSITY':
+      return { ...state, styleIntensity: action.payload };
+
+    case 'SET_CACHED_IMAGE_HASH':
+      return { ...state, cachedImageHash: action.payload };
+
+    case 'RESET_STATE':
+      return { ...initialState };
+
+    default:
+      return state;
+  }
+}
+
+// ─── Context ───────────────────────────────────────────────────────────────────
+
+const AppContext = createContext<{
+  state: AppContextState;
+  dispatch: React.Dispatch<AppAction>;
+} | undefined>(undefined);
+
+// ─── Provider ──────────────────────────────────────────────────────────────────
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  return <>{children}</>;
+  const [state, dispatch] = useReducer(appReducer, initialState);
+
+  return (
+    <AppContext.Provider value={{ state, dispatch }}>
+      {children}
+    </AppContext.Provider>
+  );
+}
+
+// ─── Hook ─────────────────────────────────────────────────────────────────────
+
+export function useAppContext() {
+  const context = useContext(AppContext);
+  if (!context) {
+    throw new Error('useAppContext must be used within AppProvider');
+  }
+  return context;
 }

@@ -1,24 +1,22 @@
 import { useCallback, useState } from 'react';
 import { imageService, ImageServiceError } from '@services/imageService';
-import { useAppStore } from '@context/AppContext';
+import { useAppState } from '@hooks/useAppState';
 import { devLog } from '@utils/helpers';
+import type { UploadedImage } from '@appTypes/index';
 
 export type UploadSource = 'gallery' | 'camera';
 
 export function useImageUpload() {
   const [isLoading, setIsLoading] = useState(false);
 
-  const setOriginalImage = useAppStore(s => s.setOriginalImage);
-  const setProcessedImage = useAppStore(s => s.setProcessedImage);
-  const setError = useAppStore(s => s.setError);
-  const resetGeneration = useAppStore(s => s.resetGeneration);
+  const { setOriginalImage, setUploadError, resetState } = useAppState();
 
   const pick = useCallback(
     async (source: UploadSource) => {
       setIsLoading(true);
-      setError(null);
+      setUploadError(null);
       // Reset previous generation when a new image is picked
-      resetGeneration();
+      resetState();
 
       try {
         const rawImage =
@@ -32,24 +30,23 @@ export function useImageUpload() {
           return;
         }
 
-        setOriginalImage(rawImage);
+        // Cast legacy type to UploadedImage (structurally identical)
+        const image: UploadedImage = rawImage;
+        setOriginalImage(image);
         devLog('Image picked', { source, size: rawImage.fileSizeBytes });
 
-        // Compress and resize for API transmission
-        const processed = await imageService.processUploadedImage(rawImage);
-        setProcessedImage(processed);
-        devLog('Image processed', { size: processed.fileSizeBytes });
+        // Image is stored as originalImage; processing happens in generation hook
       } catch (err) {
         const message =
           err instanceof ImageServiceError
             ? err.message
             : 'Failed to load image. Please try again.';
-        setError(message);
+        setUploadError(message);
       } finally {
         setIsLoading(false);
       }
     },
-    [setOriginalImage, setProcessedImage, setError, resetGeneration],
+    [setOriginalImage, setUploadError, resetState],
   );
 
   const pickFromGallery = useCallback(() => pick('gallery'), [pick]);

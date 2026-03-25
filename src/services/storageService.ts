@@ -1,114 +1,265 @@
 /**
  * storageService.ts
  *
- * Local caching for generated results and user preferences.
+ * Local file-based caching for generated images and metadata.
+ * Uses expo-file-system for device storage management.
  */
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { STORAGE_KEYS, APP_CONFIG } from '@utils/constants';
-import { devLog, safeJsonParse } from '@utils/helpers';
-import type { ClipArtStyle, GenerationResponse } from '@appTypes/index';
+import * as FileSystem from 'expo-file-system';
+import { APP_CONFIG } from '@utils/constants';
+import { devLog } from '@utils/helpers';
+import type { ClipArtStyle, ImageData, GenerationResponse } from '@appTypes/index';
 
-interface CacheEntry {
-  results: Partial<Record<ClipArtStyle, GenerationResponse>>;
-  cachedAt: number;
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+export interface CachedGeneration {
+  originalImage: ImageData;
+  generatedImages: Record<ClipArtStyle, GenerationResponse>;
+  generatedAt: string;
+  expiresAt: string;
 }
 
-// ─── Results Cache ────────────────────────────────────────────────────────────
+export interface CacheMetadata {
+  imageHash: string;
+  cachedAt: string;
+  expiresAt: string;
+  size: number;
+}
 
-export async function getCachedResults(
-  imageHash: string,
-): Promise<Partial<Record<ClipArtStyle, GenerationResponse>> | null> {
-  try {
-    const raw = await AsyncStorage.getItem(`${STORAGE_KEYS.CACHED_RESULTS}:${imageHash}`);
-    if (!raw) return null;
+export interface StorageConfig {
+  cacheDir: string;
+  maxCacheSize: number;
+  cacheExpiry: number;
+}
 
-    const entry = safeJsonParse<CacheEntry>(raw);
-    if (!entry) return null;
+// ─── Storage Service Class ────────────────────────────────────────────────────
 
-    const isExpired = Date.now() - entry.cachedAt > APP_CONFIG.CACHE_EXPIRY;
-    if (isExpired) {
-      await AsyncStorage.removeItem(`${STORAGE_KEYS.CACHED_RESULTS}:${imageHash}`);
+class StorageService {
+  private cacheDir: string;
+  private maxCacheSize: number;
+  private cacheExpiry: number;
+  private metadata: Map<string, CacheMetadata> = new Map();
+  private isInitialized = false;
+
+  constructor(config: StorageConfig) {
+    this.cacheDir = config.cacheDir;
+    this.maxCacheSize = config.maxCacheSize;
+    this.cacheExpiry = config.cacheExpiry;
+  }
+
+  // Initialize storage on app start
+  async initialize(): Promise<void> {
+    if (this.isInitialized) {
+      return;
+    }
+
+    try {
+      const dirInfo = await FileSystem.getInfoAsync(this.cacheDir);
+      if (!dirInfo.exists) {
+        await FileSystem.makeDirectoryAsync(this.cacheDir, { intermediates: true });
+      }
+
+      await this.loadMetadata();
+      await this.cleanExpiredCache();
+      this.isInitialized = true;
+      devLog('Storage service initialized');
+    } catch (error) {
+      devLog('Storage initialization error', { error: String(error) });
+    }
+  }
+
+  // ─── Hashing ──────────────────────────────────────────────────────────────
+
+  private hashImage(imageBase64: string): string {
+    // Simple hash for cache keys
+    let hash = 0;
+    const slice = imageBase64.slice(0, 1000);
+    for (let i = 0; i < slice.length; i++) {
+      const char = slice.charCodeAt(i);
+      hash = (hash << 5) - hash + char;
+      hash = hash & hash;
+    }
+    return Math.abs(hash).toString(16);
+  }
+
+  // ─── Save Generation ──────────────────────────────────────────────────────
+
+  async saveGeneration(
+    originalImage: ImageData,
+    generatedImages: Record<ClipArtStyle, GenerationResponse>,
+    ttl: number = this.cacheExpiry,
+  ): Promise<string> {
+    try {
+      const imageHash = this.hashImage(originalImage.base64);
+      const now = new Date();
+      const expiresAt = new Date(now.getTime() + ttl);
+
+      const cacheEntry: CachedGeneration = {
+        originalImage,
+        generatedImages,
+        generatedAt: now.toISOString(),
+        expiresAt: expiresAt.toISOString(),
+      };
+
+      const filePath = `${this.cacheDir}/generation_${imageHash}.json`;
+      const content = JSON.stringify(cacheEntry);
+
+      await FileSystem.writeAsStringAsync(filePath, content);
+
+      this.metadata.set(imageHash, {
+        imageHash,
+        cachedAt: now.toISOString(),
+        expiresAt: expiresAt.toISOString(),
+        size: content.length,
+      });
+
+      await this.saveMetadata();
+      devLog('Generation cached', { imageHash });
+
+      return imageHash;
+    } catch (error) {
+      devLog('Failed to save generation', { error: String(error) });
+      throw error;
+    }
+  }
+
+  // ─── Retrieve Cached Generation ───────────────────────────────────────────
+
+  async getCachedGeneration(imageHash: string): Promise<CachedGeneration | null> {
+    try {
+      const filePath = `${this.cacheDir}/generation_${imageHash}.json`;
+      const fileInfo = await FileSystem.getInfoAsync(filePath);
+
+      if (!fileInfo.exists) {
+        return null;
+      }
+
+      const content = await FileSystem.readAsStringAsync(filePath);
+      const cacheEntry: CachedGeneration = JSON.parse(content);
+
+      // Check if expired
+      const expiresAt = new Date(cacheEntry.expiresAt);
+      if (expiresAt < new Date()) {
+        await this.deleteGeneration(imageHash);
+        return null;
+      }
+
+      devLog('Cache hit', { imageHash });
+      return cacheEntry;
+    } catch (error) {
+      devLog('Failed to retrieve cached generation', { error: String(error) });
       return null;
     }
-
-    devLog('Cache hit', { imageHash });
-    return entry.results;
-  } catch {
-    return null;
   }
-}
 
-export async function setCachedResults(
-  imageHash: string,
-  results: Partial<Record<ClipArtStyle, GenerationResponse>>,
-): Promise<void> {
-  try {
-    const entry: CacheEntry = { results, cachedAt: Date.now() };
-    await AsyncStorage.setItem(
-      `${STORAGE_KEYS.CACHED_RESULTS}:${imageHash}`,
-      JSON.stringify(entry),
-    );
-    devLog('Results cached', { imageHash });
-  } catch {
-    // Storage failure is non-fatal — app continues without caching
-  }
-}
+  // ─── Delete Cached Generation ─────────────────────────────────────────────
 
-// ─── User Preferences ─────────────────────────────────────────────────────────
+  async deleteGeneration(imageHash: string): Promise<void> {
+    try {
+      const filePath = `${this.cacheDir}/generation_${imageHash}.json`;
+      const fileInfo = await FileSystem.getInfoAsync(filePath);
 
-export interface UserPreferences {
-  defaultIntensity: number;
-  defaultStyles: ClipArtStyle[];
-  lastUsedStyles: ClipArtStyle[];
-}
+      if (fileInfo.exists) {
+        await FileSystem.deleteAsync(filePath);
+      }
 
-const DEFAULT_PREFERENCES: UserPreferences = {
-  defaultIntensity: 6,
-  defaultStyles: ['cartoon', 'flat', 'anime', 'pixel', 'sketch'],
-  lastUsedStyles: ['cartoon', 'flat', 'anime', 'pixel', 'sketch'],
-};
-
-export async function getUserPreferences(): Promise<UserPreferences> {
-  try {
-    const raw = await AsyncStorage.getItem(STORAGE_KEYS.USER_PREFERENCES);
-    if (!raw) return DEFAULT_PREFERENCES;
-    return safeJsonParse<UserPreferences>(raw) ?? DEFAULT_PREFERENCES;
-  } catch {
-    return DEFAULT_PREFERENCES;
-  }
-}
-
-export async function saveUserPreferences(prefs: Partial<UserPreferences>): Promise<void> {
-  try {
-    const current = await getUserPreferences();
-    await AsyncStorage.setItem(
-      STORAGE_KEYS.USER_PREFERENCES,
-      JSON.stringify({ ...current, ...prefs }),
-    );
-  } catch {
-    // Non-fatal
-  }
-}
-
-// ─── Cache Management ─────────────────────────────────────────────────────────
-
-export async function clearResultsCache(): Promise<void> {
-  try {
-    const keys = await AsyncStorage.getAllKeys();
-    const cacheKeys = keys.filter(k => k.startsWith(STORAGE_KEYS.CACHED_RESULTS));
-    if (cacheKeys.length > 0) {
-      await AsyncStorage.multiRemove(cacheKeys);
+      this.metadata.delete(imageHash);
+      await this.saveMetadata();
+    } catch (error) {
+      devLog('Failed to delete generation', { error: String(error) });
     }
-  } catch {
-    // Non-fatal
+  }
+
+  // ─── Clean Expired Cache ──────────────────────────────────────────────────
+
+  async cleanExpiredCache(): Promise<void> {
+    try {
+      const now = new Date();
+      const expiredHashes: string[] = [];
+
+      for (const [hash, metadata] of this.metadata) {
+        const expiresAt = new Date(metadata.expiresAt);
+        if (expiresAt < now) {
+          expiredHashes.push(hash);
+        }
+      }
+
+      for (const hash of expiredHashes) {
+        await this.deleteGeneration(hash);
+      }
+
+      if (expiredHashes.length > 0) {
+        devLog('Cleaned expired cache', { count: expiredHashes.length });
+      }
+    } catch (error) {
+      devLog('Failed to clean expired cache', { error: String(error) });
+    }
+  }
+
+  // ─── Metadata Management ──────────────────────────────────────────────────
+
+  private async saveMetadata(): Promise<void> {
+    try {
+      const metadataPath = `${this.cacheDir}/.metadata.json`;
+      const metadataObj = Object.fromEntries(this.metadata);
+      await FileSystem.writeAsStringAsync(metadataPath, JSON.stringify(metadataObj));
+    } catch (error) {
+      devLog('Failed to save metadata', { error: String(error) });
+    }
+  }
+
+  private async loadMetadata(): Promise<void> {
+    try {
+      const metadataPath = `${this.cacheDir}/.metadata.json`;
+      const fileInfo = await FileSystem.getInfoAsync(metadataPath);
+
+      if (!fileInfo.exists) {
+        return;
+      }
+
+      const content = await FileSystem.readAsStringAsync(metadataPath);
+      const metadataObj = JSON.parse(content);
+
+      this.metadata = new Map(Object.entries(metadataObj) as [string, CacheMetadata][]);
+    } catch (error) {
+      devLog('Failed to load metadata', { error: String(error) });
+    }
+  }
+
+  // ─── Cache Size Management ───────────────────────────────────────────────
+
+  async getCacheSize(): Promise<number> {
+    try {
+      let totalSize = 0;
+      for (const metadata of this.metadata.values()) {
+        totalSize += metadata.size;
+      }
+      return totalSize;
+    } catch (error) {
+      devLog('Failed to get cache size', { error: String(error) });
+      return 0;
+    }
+  }
+
+  async clearAllCache(): Promise<void> {
+    try {
+      const hashes = Array.from(this.metadata.keys());
+      for (const hash of hashes) {
+        await this.deleteGeneration(hash);
+      }
+      devLog('All cache cleared');
+    } catch (error) {
+      devLog('Failed to clear all cache', { error: String(error) });
+    }
   }
 }
 
-export const storageService = {
-  getCachedResults,
-  setCachedResults,
-  getUserPreferences,
-  saveUserPreferences,
-  clearResultsCache,
+// ─── Singleton Instance ───────────────────────────────────────────────────────
+
+const STORAGE_CONFIG: StorageConfig = {
+  cacheDir: `${FileSystem.documentDirectory}clipart_cache`,
+  maxCacheSize: 100 * 1024 * 1024,
+  cacheExpiry: APP_CONFIG.CACHE_EXPIRY,
 };
+
+export const storageService = new StorageService(STORAGE_CONFIG);

@@ -1,25 +1,26 @@
 import { useRef, useCallback } from 'react';
 import { AIServiceError, aiService } from '@services/aiService';
-import { useAppStore } from '@context/AppContext';
+import { useAppState } from '@hooks/useAppState';
 import { devLog } from '@utils/helpers';
 import type { ClipArtStyle } from '@appTypes/index';
 
 export function useImageGeneration() {
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Granular selectors to avoid unnecessary re-renders
-  const processedImage = useAppStore(s => s.processedImage);
-  const selectedStyles = useAppStore(s => s.selectedStyles);
-  const setGenerationStatus = useAppStore(s => s.setGenerationStatus);
-  const setGenerationProgress = useAppStore(s => s.setGenerationProgress);
-  const setGeneratedImage = useAppStore(s => s.setGeneratedImage);
-  const setError = useAppStore(s => s.setError);
-  const resetGeneration = useAppStore(s => s.resetGeneration);
+  const {
+    state,
+    setGenerationLoading,
+    setGenerationProgress,
+    setAllGeneratedImages,
+    setGenerationError,
+  } = useAppState();
+
+  const { originalImage, selectedStyles } = state;
 
   const generate = useCallback(
     async (overrideStyles?: ClipArtStyle[], intensity?: number) => {
-      if (!processedImage?.base64) {
-        setError('Please upload and process an image first.');
+      if (!originalImage?.base64) {
+        setGenerationError('Please upload an image first.');
         return;
       }
 
@@ -28,8 +29,9 @@ export function useImageGeneration() {
       abortControllerRef.current = new AbortController();
       const signal = abortControllerRef.current.signal;
 
-      resetGeneration();
-      setGenerationStatus('queued', 0);
+      setGenerationLoading(true);
+      setGenerationProgress(0);
+      setGenerationError(null);
 
       try {
         const styles = overrideStyles ?? selectedStyles;
@@ -37,7 +39,7 @@ export function useImageGeneration() {
 
         const response = await aiService.generateAllStyles(
           {
-            imageBase64: processedImage.base64,
+            imageBase64: originalImage.base64,
             styles,
             intensity,
           },
@@ -45,18 +47,16 @@ export function useImageGeneration() {
           (progress, partialResults) => {
             setGenerationProgress(progress);
             // Progressively commit partial results as they arrive
-            partialResults.forEach(result => {
-              setGeneratedImage(result.styleType, result);
-            });
+            if (partialResults.length > 0) {
+              setAllGeneratedImages(partialResults);
+            }
           },
         );
 
         // Commit any final results not yet set via onProgress
-        response.results.forEach(result => {
-          setGeneratedImage(result.styleType, result);
-        });
+        setAllGeneratedImages(response.results);
 
-        setGenerationStatus('completed', 100);
+        setGenerationProgress(100);
         devLog('Generation complete', {
           success: response.successCount,
           failures: response.failureCount,
@@ -64,23 +64,22 @@ export function useImageGeneration() {
         });
       } catch (err) {
         if (err instanceof AIServiceError && err.code === 'ERR_CANCELLED') {
-          setGenerationStatus('cancelled', 0);
+          devLog('Generation cancelled by user');
         } else {
-          setGenerationStatus('failed', 0);
-          setError(err instanceof Error ? err.message : 'Generation failed. Please try again.');
+          setGenerationError(err instanceof Error ? err.message : 'Generation failed. Please try again.');
         }
       } finally {
+        setGenerationLoading(false);
         abortControllerRef.current = null;
       }
     },
     [
-      processedImage,
+      originalImage,
       selectedStyles,
-      resetGeneration,
-      setGenerationStatus,
+      setGenerationLoading,
       setGenerationProgress,
-      setGeneratedImage,
-      setError,
+      setAllGeneratedImages,
+      setGenerationError,
     ],
   );
 

@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { STYLES, STYLE_LABELS, STYLE_DESCRIPTIONS, STYLE_EMOJIS } from '@utils/prompts';
-import { useAppStore } from '@context/AppContext';
+import { useAppState } from '@hooks/useAppState';
 import { colors, spacing, radius, typography } from '@styles/tokens';
 import type { ClipArtStyle } from '@appTypes/index';
 
@@ -10,8 +10,8 @@ interface StyleSelectorProps {
 }
 
 export function StyleSelector({ onSelectionChange }: StyleSelectorProps) {
-  const selectedStyles = useAppStore(s => s.selectedStyles);
-  const setSelectedStyles = useAppStore(s => s.setSelectedStyles);
+  const { state, setSelectedStyles } = useAppState();
+  const selectedStyles = state.selectedStyles;
 
   const toggle = (style: ClipArtStyle) => {
     const next = selectedStyles.includes(style)

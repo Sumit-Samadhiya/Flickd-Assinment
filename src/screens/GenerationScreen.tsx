@@ -10,7 +10,7 @@ import Animated, {
   Easing,
 } from 'react-native-reanimated';
 import { useImageGeneration } from '@hooks/useImageGeneration';
-import { useAppStore } from '@context/AppContext';
+import { useAppState } from '@hooks/useAppState';
 import { STYLE_LABELS, STYLE_EMOJIS } from '@utils/prompts';
 import { colors, spacing, radius, typography } from '@styles/tokens';
 import { globalStyles } from '@styles/globalStyles';
@@ -45,31 +45,30 @@ function SkeletonCard({ index }: { index: number }) {
 export function GenerationScreen({ navigation }: GenerationScreenProps) {
   const { generate, cancel } = useImageGeneration();
 
-  const generationStatus = useAppStore(s => s.generationStatus);
-  const generationProgress = useAppStore(s => s.generationProgress);
-  const generatedImages = useAppStore(s => s.generatedImages);
-  const error = useAppStore(s => s.error);
+  const { state } = useAppState();
+  const { isGenerating, generationProgress, generatedImages, generationError } = state;
 
-  const completedCount = Object.keys(generatedImages).length;
+  const completedCount = Object.values(generatedImages).filter(img => img !== null).length;
 
   useEffect(() => {
     generate();
   }, [generate]);
 
   useEffect(() => {
-    if (generationStatus === 'completed' || generationStatus === 'partial') {
+    const hasResults = Object.values(generatedImages).some(img => img !== null);
+    if (!isGenerating && hasResults) {
       const timer = setTimeout(() => navigation.replace('Results', {}), 800);
       return () => clearTimeout(timer);
     }
-  }, [generationStatus, navigation]);
+  }, [isGenerating, generatedImages, navigation]);
 
-  if (error && generationStatus === 'failed') {
+  if (generationError) {
     return (
       <SafeAreaView style={globalStyles.screen} edges={['bottom']}>
         <View style={[globalStyles.centered, styles.errorContainer]}>
           <Text style={styles.errorEmoji}>⚠️</Text>
           <Text style={styles.errorTitle}>Generation Failed</Text>
-          <Text style={styles.errorMessage}>{error}</Text>
+          <Text style={styles.errorMessage}>{generationError}</Text>
           <TouchableOpacity
             style={styles.retryButton}
             onPress={() => generate()}
@@ -112,7 +111,7 @@ export function GenerationScreen({ navigation }: GenerationScreenProps) {
         {/* Skeleton grid */}
         <View style={styles.grid}>
           {ALL_STYLES.map((style, i) => {
-            const done = !!generatedImages[style];
+            const done = generatedImages[style] !== null;
             return (
               <View key={style} style={styles.cardWrapper}>
                 {done ? (
