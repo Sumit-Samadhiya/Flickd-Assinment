@@ -38,7 +38,12 @@ export type AppAction =
   | { type: 'SET_GENERATION_LOADING'; payload: boolean }
   | { type: 'SET_GENERATION_PROGRESS'; payload: number }
   | { type: 'SET_GENERATED_IMAGE'; payload: { style: ClipArtStyle; image: GenerationResponse } }
-  | { type: 'SET_ALL_GENERATED_IMAGES'; payload: GenerationResponse[] }
+  | {
+      type: 'SET_ALL_GENERATED_IMAGES';
+      payload:
+        | GenerationResponse[]
+        | Record<ClipArtStyle, GenerationResponse | null>;
+    }
   | { type: 'SET_GENERATION_ERROR'; payload: string | null }
   | { type: 'SET_CURRENT_STEP'; payload: AppContextState['currentStep'] }
   | { type: 'SET_STYLE_INTENSITY'; payload: number }
@@ -108,17 +113,26 @@ function appReducer(state: AppContextState, action: AppAction): AppContextState 
       };
 
     case 'SET_ALL_GENERATED_IMAGES': {
-      // Convert array of GenerationResponse to Record<ClipArtStyle, GenerationResponse>
-      const imageRecord = action.payload.reduce(
-        (acc, response) => {
-          acc[response.styleType] = response;
-          return acc;
-        },
-        { ...initialState.generatedImages }
-      );
+      if (Array.isArray(action.payload)) {
+        const imageRecord = action.payload.reduce(
+          (acc, response) => {
+            acc[response.styleType] = response;
+            return acc;
+          },
+          { ...initialState.generatedImages },
+        );
+        return {
+          ...state,
+          generatedImages: imageRecord,
+        };
+      }
+
       return {
         ...state,
-        generatedImages: imageRecord,
+        generatedImages: {
+          ...initialState.generatedImages,
+          ...action.payload,
+        },
       };
     }
 

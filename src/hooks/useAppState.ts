@@ -52,7 +52,7 @@ export function useAppState() {
   );
 
   const setAllGeneratedImages = useCallback(
-    (images: GenerationResponse[]) => {
+    (images: GenerationResponse[] | Record<ClipArtStyle, GenerationResponse | null>) => {
       dispatch({ type: 'SET_ALL_GENERATED_IMAGES', payload: images });
     },
     [dispatch],

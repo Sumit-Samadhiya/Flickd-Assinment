@@ -1,41 +1,96 @@
 import { useCallback } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { safeJsonParse } from '@utils/helpers';
+import { useAppState } from './useAppState';
+import { storageService, type CachedGeneration } from '@services/storageService';
+import { getErrorMessage } from '@utils/validators';
 
 export function useLocalStorage() {
-  const getItem = useCallback(async <T>(key: string): Promise<T | null> => {
+  const {
+    state,
+    setOriginalImage,
+    setAllGeneratedImages,
+    setCachedImageHash,
+  } = useAppState();
+
+  const saveCurrentGeneration = useCallback(async () => {
     try {
-      const raw = await AsyncStorage.getItem(key);
-      if (raw === null) return null;
-      return safeJsonParse<T>(raw);
-    } catch {
-      return null;
+      if (!state.originalImage) {
+        throw new Error('No image to save');
+      }
+
+      const validImages = Object.values(state.generatedImages).filter(
+        (image): image is NonNullable<typeof image> => image !== null,
+      );
+
+      const imageHash = await storageService.saveGeneration(
+        state.originalImage,
+        validImages,
+      );
+
+      setCachedImageHash(imageHash);
+      return imageHash;
+    } catch (error) {
+      console.error('Failed to save generation:', getErrorMessage(error));
+      throw error;
+    }
+  }, [state.originalImage, state.generatedImages, setCachedImageHash]);
+
+  const loadCachedGeneration = useCallback(
+    async (imageHash: string): Promise<CachedGeneration | null> => {
+      try {
+        const cached = await storageService.getCachedGeneration(imageHash);
+        if (!cached) {
+          return null;
+        }
+
+        setOriginalImage(cached.originalImage);
+        setAllGeneratedImages(cached.generatedImages);
+        setCachedImageHash(imageHash);
+
+        return cached;
+      } catch (error) {
+        console.error('Failed to load cached generation:', getErrorMessage(error));
+        return null;
+      }
+    },
+    [setOriginalImage, setAllGeneratedImages, setCachedImageHash],
+  );
+
+  const deleteCachedGeneration = useCallback(async (imageHash: string) => {
+    try {
+      await storageService.deleteGeneration(imageHash);
+      if (state.cachedImageHash === imageHash) {
+        setCachedImageHash(null);
+      }
+    } catch (error) {
+      console.error('Failed to delete cached generation:', getErrorMessage(error));
+      throw error;
+    }
+  }, [state.cachedImageHash, setCachedImageHash]);
+
+  const getCacheSize = useCallback(async () => {
+    try {
+      return await storageService.getCacheSize();
+    } catch (error) {
+      console.error('Failed to get cache size:', getErrorMessage(error));
+      return 0;
     }
   }, []);
 
-  const setItem = useCallback(async <T>(key: string, value: T): Promise<void> => {
+  const clearAllCache = useCallback(async () => {
     try {
-      await AsyncStorage.setItem(key, JSON.stringify(value));
-    } catch {
-      // Non-fatal — app continues without storage
+      await storageService.clearAllCache();
+      setCachedImageHash(null);
+    } catch (error) {
+      console.error('Failed to clear all cache:', getErrorMessage(error));
+      throw error;
     }
-  }, []);
+  }, [setCachedImageHash]);
 
-  const removeItem = useCallback(async (key: string): Promise<void> => {
-    try {
-      await AsyncStorage.removeItem(key);
-    } catch {
-      // Non-fatal
-    }
-  }, []);
-
-  const clear = useCallback(async (): Promise<void> => {
-    try {
-      await AsyncStorage.clear();
-    } catch {
-      // Non-fatal
-    }
-  }, []);
-
-  return { getItem, setItem, removeItem, clear };
+  return {
+    saveCurrentGeneration,
+    loadCachedGeneration,
+    deleteCachedGeneration,
+    getCacheSize,
+    clearAllCache,
+  };
 }

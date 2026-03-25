@@ -8,3 +8,4 @@ export { useAppState } from './useAppState';
 export { useImageUpload } from './useImageUpload';
 export { useImageGeneration } from './useImageGeneration';
 export { useLocalStorage } from './useLocalStorage';
+export { useClipArtFlow } from './useClipArtFlow';

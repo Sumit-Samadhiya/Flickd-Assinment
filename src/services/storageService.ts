@@ -8,13 +8,13 @@
 import * as FileSystem from 'expo-file-system';
 import { APP_CONFIG } from '@utils/constants';
 import { devLog } from '@utils/helpers';
-import type { ClipArtStyle, ImageData, GenerationResponse } from '@appTypes/index';
+import type { ClipArtStyle, UploadedImage, GenerationResponse } from '@appTypes/index';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface CachedGeneration {
-  originalImage: ImageData;
-  generatedImages: Record<ClipArtStyle, GenerationResponse>;
+  originalImage: UploadedImage;
+  generatedImages: Record<ClipArtStyle, GenerationResponse | null>;
   generatedAt: string;
   expiresAt: string;
 }
@@ -85,8 +85,8 @@ class StorageService {
   // ─── Save Generation ──────────────────────────────────────────────────────
 
   async saveGeneration(
-    originalImage: ImageData,
-    generatedImages: Record<ClipArtStyle, GenerationResponse>,
+    originalImage: UploadedImage,
+    generatedImages: GenerationResponse[],
     ttl: number = this.cacheExpiry,
   ): Promise<string> {
     try {
@@ -94,9 +94,21 @@ class StorageService {
       const now = new Date();
       const expiresAt = new Date(now.getTime() + ttl);
 
+      const generatedImageRecord: Record<ClipArtStyle, GenerationResponse | null> = {
+        cartoon: null,
+        flat: null,
+        anime: null,
+        pixel: null,
+        sketch: null,
+      };
+
+      for (const result of generatedImages) {
+        generatedImageRecord[result.styleType] = result;
+      }
+
       const cacheEntry: CachedGeneration = {
         originalImage,
-        generatedImages,
+        generatedImages: generatedImageRecord,
         generatedAt: now.toISOString(),
         expiresAt: expiresAt.toISOString(),
       };
